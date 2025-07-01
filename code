@@ -1,0 +1,56 @@
+from langchain_community.document_loaders import UnstructuredURLLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_ollama import ChatOllama
+from langchain_core.documents import Document
+
+# Load data from Wikipedia URL
+loa = UnstructuredURLLoader(urls=[")"])
+data = loa.load()
+
+# Extract text
+text = data[0].page_content
+
+# Split into chunks
+tp = RecursiveCharacterTextSplitter(
+    separators=["\n\n", "\n", " "],
+    chunk_size=200,
+    chunk_overlap=0,
+)
+chunks = tp.split_text(text)
+
+# Wrap chunks into Document objects
+docs = [Document(page_content=chunk) for chunk in chunks]
+
+# Embedding model
+embd = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+# Store embeddings in Chroma DB (auto-persistence, no need to call .persist())
+vec = Chroma.from_documents(docs, embd, persist_directory="./chroma_db")
+
+# Query
+query = input("Enter your question: ")
+query_embedding = embd.embed_query(query)
+
+# Retrieve top 3 similar chunks
+retrieved_docs = vec.similarity_search_by_vector(query_embedding, k=3)
+
+# Prepare context for LLM
+context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+
+# Prompt for LLM
+prompt = f"""Answer the following question **using only the context provided below**.
+If the answer is not contained in the context, reply with "I don't know."
+
+{context}
+
+Question: {query}
+Answer:"""
+
+# LLM using Ollama
+llm = ChatOllama(model="mistral", temperature=0.3)
+
+# Run LLM
+response = llm.invoke(prompt)
+print("\nAnswer from LLM:", response)
